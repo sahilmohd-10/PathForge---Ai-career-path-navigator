@@ -18,8 +18,8 @@ Complete Adzuna API integration service with:
 
 **API Credentials (Embedded):**
 ```
-App ID: f448502e
-App Key: 7816e36630e9802e2c7e656b419716f9
+App ID: 
+App Key: 
 ```
 
 #### `/ADZUNA_API_GUIDE.md`
