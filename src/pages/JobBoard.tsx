@@ -278,16 +278,22 @@ const JobBoard = () => {
     }
 
     try {
-      // For Adzuna jobs, save to database first if it has an external_id
-      if (job.external_id && !job.id) {
-        await axios.post('/api/jobs/sync-to-db', {
-          jobs: [job]
-        });
+      // For Adzuna jobs (no local id), save to database first so they can be applied to
+      if (job.external_id && !job.is_local) {
+        try {
+          const syncRes = await axios.post('/api/jobs/sync-to-db', { jobs: [job] });
+          const savedId = syncRes.data.ids?.[0];
+          const applyId = savedId || job.external_id;
+          await axios.post(`/api/jobs/${applyId}/apply`, { userId: user.id });
+        } catch (syncErr: any) {
+          // If sync fails (e.g. duplicate), try applying with external_id anyway
+          await axios.post(`/api/jobs/${job.external_id}/apply`, { userId: user.id });
+        }
+      } else {
+        // Local DB job posted by a recruiter
+        const jobId = job.id;
+        await axios.post(`/api/jobs/${jobId}/apply`, { userId: user.id });
       }
-
-      // Then apply
-      const jobId = job.id || job.external_id;
-      await axios.post(`/api/jobs/${jobId}/apply`, { userId: user.id });
       
       setSuccessMessage('Application submitted successfully! Redirecting to Adzuna...');
       setTimeout(() => {
@@ -412,7 +418,7 @@ const JobBoard = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
             {jobs.map((job: any, idx: number) => (
               <div
-                key={job.external_id || idx}
+                key={job.id || job.external_id || idx}
                 className="bg-white dark:bg-neon-dark p-6 rounded-2xl border border-gray-100 dark:border-neon-teal shadow-sm hover:shadow-lg dark:hover:shadow-lg dark:hover:shadow-neon-cyan/20 transition-all"
               >
                 <div className="flex justify-between items-start mb-4">
@@ -485,6 +491,9 @@ const JobBoard = () => {
                       <ExternalLink className="h-4 w-4" />
                     </a>
                   )}
+                  {job.is_local && (
+                    <span className="px-3 py-1 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 rounded-xl text-xs font-bold">Local</span>
+                  )}
                 </div>
               </div>
             ))}
@@ -547,7 +556,7 @@ const JobBoard = () => {
 
       {/* Adzuna Info */}
       <div className="mt-12 p-4 bg-blue-50 dark:bg-neon-dark border border-blue-100 dark:border-neon-teal rounded-xl text-sm text-gray-600 dark:text-neon-light text-center">
-        💼 Jobs are fetched in real-time from <span className="font-semibold">Adzuna</span> - the world's largest job database
+        💼 Jobs from <span className="font-semibold">Adzuna</span> (world's largest job database) and <span className="font-semibold text-emerald-600 dark:text-emerald-400">local recruiter postings</span> are shown together
       </div>
     </PageShell>
   );

@@ -1,8 +1,10 @@
 import express from 'express';
 import { aiService } from '../aiService.ts';
 import db from '../db.ts';
+import multer from 'multer';
 
 const router = express.Router();
+const upload = multer({ storage: multer.memoryStorage() });
 
 router.post('/analyze-resume', async (req: any, res) => {
   const { userId, resumeText } = req.body;
@@ -26,7 +28,7 @@ router.post('/analyze-resume', async (req: any, res) => {
     }).onConflict('user_id').merge();
 
     await db('profiles').where({ user_id: userId }).update({
-      job_readiness_score: analysis.resume_score 
+      job_readiness_score: analysis.resume_score
     });
 
     const existingCareerScore = await db('career_scores')
@@ -75,7 +77,7 @@ router.post('/career-guidance', async (req, res) => {
       .join('skills', 'user_skills.skill_id', 'skills.id')
       .where({ user_id: userId })
       .select('skills.name');
-    
+
     const guidance = await aiService.getCareerGuidance(
       resume?.raw_text || '',
       interests || [],
@@ -119,7 +121,7 @@ router.post('/unified-analysis', async (req: any, res) => {
   try {
     // 1. Analyze Resume
     const analysis = await aiService.analyzeResume(resumeText);
-    
+
     // 2. ML Analysis
     const mlAnalysis = await aiService.getMLModelAnalysis(profileData, resumeText);
     const predictedRole = mlAnalysis.predicted_role || analysis.predicted_role || 'Technology Professional';
@@ -131,8 +133,8 @@ router.post('/unified-analysis', async (req: any, res) => {
     // Combine Everything
     const unifiedResults = {
       resumeScore: geminiAnalysis.resume_score || analysis.resume_score,
-      overallImprovements: geminiAnalysis.areas_of_improvement && geminiAnalysis.areas_of_improvement.length > 0 
-        ? geminiAnalysis.areas_of_improvement 
+      overallImprovements: geminiAnalysis.areas_of_improvement && geminiAnalysis.areas_of_improvement.length > 0
+        ? geminiAnalysis.areas_of_improvement
         : analysis.suggestions,
       mlPredictions: {
         ...mlAnalysis,
@@ -150,6 +152,88 @@ router.post('/unified-analysis', async (req: any, res) => {
   } catch (error: any) {
     console.error('Unified analysis error:', error);
     res.status(500).json({ error: error.message || 'Failed to complete unified analysis' });
+  }
+});
+
+// Resume Upload and Parsing Endpoint
+router.post('/upload-resume', upload.single('resume'), async (req: any, res) => {
+  const { userId } = req.body;
+  if (!userId) return res.status(400).json({ error: 'User ID is required' });
+  if (!req.file) return res.status(400).json({ error: 'No resume file provided' });
+
+  try {
+    let resumeText = '';
+    
+    if (req.file.mimetype === 'application/pdf') {
+      const { PDFParse } = await import('pdf-parse');
+      const parser = new PDFParse({ data: req.file.buffer });
+      const textResult = await parser.getText();
+      resumeText = textResult.text;
+    } else if (req.file.mimetype === 'text/plain') {
+      resumeText = req.file.buffer.toString('utf-8');
+    } else {
+      return res.status(400).json({ error: 'Unsupported file format. Please upload PDF or TXT.' });
+    }
+
+    if (!resumeText.trim()) {
+      return res.status(400).json({ error: 'Resume file appears to be empty or unreadable' });
+    }
+
+    const { geminiService } = await import('../geminiService.ts');
+    const parsed = await geminiService.parseResumeText(resumeText);
+
+    // 1. Store in resume_data (which we know has raw_text and extracted_json)
+    await db('resume_data').insert({
+      user_id: userId,
+      raw_text: resumeText,
+      extracted_json: JSON.stringify(parsed),
+      resume_score: parsed.resume_score || 0,
+      suggestions: parsed.career_goal || '',
+      updated_at: new Date()
+    }).onConflict('user_id').merge();
+
+    // 2. Sync parsed info to Profile
+    const profileUpdate: any = {};
+    if (parsed.bio) profileUpdate.bio = parsed.bio;
+    if (parsed.target_career) profileUpdate.target_career = parsed.target_career;
+    if (parsed.education) profileUpdate.education = parsed.education;
+    if (parsed.experience_years !== undefined) profileUpdate.experience_years = parsed.experience_years;
+    if (parsed.location) profileUpdate.location = parsed.location;
+    if (parsed.website) profileUpdate.website = parsed.website;
+
+    if (Object.keys(profileUpdate).length > 0) {
+      await db('profiles').where({ user_id: userId }).update(profileUpdate);
+    }
+
+    // 3. Sync skills to user_skills
+    if (parsed.skills && Array.isArray(parsed.skills) && parsed.skills.length > 0) {
+      for (const skillName of parsed.skills) {
+        if (!skillName || typeof skillName !== 'string') continue;
+        const trimmed = skillName.trim();
+        if (!trimmed) continue;
+
+        // Find or create skill
+        let skill = await db('skills').where({ name: trimmed }).first();
+        if (!skill) {
+          const [id] = await db('skills').insert({ name: trimmed, category: 'Parsed from Resume' });
+          skill = { id };
+        }
+        
+        // Link to user if not already linked
+        const existing = await db('user_skills').where({ user_id: userId, skill_id: skill.id }).first();
+        if (!existing) {
+          await db('user_skills').insert({ user_id: userId, skill_id: skill.id, proficiency_level: 50 });
+        }
+      }
+    }
+
+    res.json({ 
+      message: 'Resume processed successfully and profile updated',
+      parsed 
+    });
+  } catch (error: any) {
+    console.error('Resume upload/parse error:', error);
+    res.status(500).json({ error: error.message || 'Failed to process resume' });
   }
 });
 

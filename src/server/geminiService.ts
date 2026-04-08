@@ -431,6 +431,60 @@ Provide a highly accurate and critical comprehensive analysis. Return ONLY valid
         job_description: "Unable to generate job description at this time."
       };
     }
+  },
+
+  async parseResumeText(resumeText: string): Promise<any> {
+    if (!genAI) {
+      console.error('❌ Gemini API not initialized. Check GEMINI_API_KEY in .env file');
+      throw new Error('Gemini API not initialized');
+    }
+
+    const prompt = `You are a resume parser. Extract structured information from the following resume text.
+
+Resume Text:
+---
+${resumeText}
+---
+
+Extract and return ONLY valid JSON (no markdown, no code fences):
+{
+  "full_name": "Candidate's full name",
+  "email": "Email if found or empty string",
+  "phone": "Phone if found or empty string",
+  "location": "City, State/Country if found or empty string",
+  "bio": "A 2-3 sentence professional summary based on the resume",
+  "target_career": "The most likely target career/role based on experience and skills",
+  "education": "Highest education qualification (e.g. B.Tech CSE, MCA, etc.)",
+  "experience_years": 0,
+  "skills": ["skill1", "skill2", "skill3"],
+  "tools": ["tool1", "tool2"],
+  "experience_summary": "A concise summary of work experience",
+  "career_goal": "Inferred career goal based on resume trajectory",
+  "current_role": "Current or most recent job title",
+  "education_level": "B.Tech CSE or BCA or M.Tech or MCA or B.Sc IT or Self-taught + Certifications",
+  "experience_level": "Fresher or 1-3 years or 3-5 years or 5+ years",
+  "website": "Portfolio or LinkedIn URL if found or empty string"
+}`;
+
+    try {
+      console.log('📞 Calling Gemini for resume parsing...');
+      const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+      const result = await model.generateContent(prompt);
+      const response = await result.response;
+      const text = response.text();
+      
+      console.log('✅ Received Gemini response for resume parsing');
+      
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        return JSON.parse(jsonMatch[0]);
+      } else {
+        return JSON.parse(text);
+      }
+    } catch (error: any) {
+      console.error('❌ Gemini resume parsing error:', error.message);
+      throw new Error('Failed to parse resume with Gemini');
+    }
   }
 };
 

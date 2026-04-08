@@ -35,7 +35,7 @@ router.get('/', async (req, res) => {
     } else if (source === 'all') {
       // Fetch from both and merge
       const adzunaJobs = await fetchAdzunaJobs(country, category, page, limit).catch(() => []);
-      const dbJobs = await db('jobs').select('*').orderBy('created_at', 'desc').limit(limit).offset((page - 1) * limit);
+      const dbJobs = await db('jobs').whereNotNull('posted_by').select('*').orderBy('created_at', 'desc').limit(limit).offset((page - 1) * limit);
       
       const formattedDbJobs = dbJobs.map(job => ({
         id: job.id.toString(),
@@ -61,11 +61,11 @@ router.get('/', async (req, res) => {
       });
     } else {
       // Fetch from database
-      let query = db('jobs');
+      let query = db('jobs').whereNotNull('posted_by');
       
       // If no recruiter-posted jobs exist, this will be empty
       const jobs = await query.select('*').orderBy('created_at', 'desc').limit(limit).offset((page - 1) * limit);
-      const total = await db('jobs').count('* as count').first();
+      const total = await db('jobs').whereNotNull('posted_by').count('* as count').first();
       
       res.json({
         source: 'db',
@@ -128,8 +128,11 @@ router.get('/search', async (req, res) => {
 
     // Search local database
     const dbJobs = await db('jobs')
-      .where('title', 'ilike', `%${keywords}%`)
-      .orWhere('company', 'ilike', `%${keywords}%`)
+      .whereNotNull('posted_by')
+      .where(function() {
+        this.where('title', 'like', `%${keywords}%`)
+            .orWhere('company', 'like', `%${keywords}%`)
+      })
       .orderBy('created_at', 'desc')
       .limit(limit)
       .offset((page - 1) * limit);

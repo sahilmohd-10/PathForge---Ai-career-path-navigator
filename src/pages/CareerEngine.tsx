@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { Brain, Sparkles, ChevronRight, RefreshCw, TrendingUp, Target, Zap, DollarSign, Activity, Lightbulb, BookOpen, Briefcase, Search } from 'lucide-react';
+import { Brain, Sparkles, ChevronRight, RefreshCw, TrendingUp, Target, Zap, DollarSign, Activity, Lightbulb, BookOpen, Briefcase, Search, Upload, FileText } from 'lucide-react';
 import axios from 'axios';
 import { motion } from 'framer-motion';
 import { Radar, RadarChart, PolarGrid, PolarAngleAxis, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell } from 'recharts';
@@ -31,12 +31,12 @@ interface UnifiedResults {
 const getSemesterOptions = (educationLevel: string) => {
   if (!educationLevel) return [];
   let maxSemesters = 0;
-  if (educationLevel === 'B.Tech CSE') maxSemesters = 8;
+  if (educationLevel === 'B.Tech') maxSemesters = 8;
   else if (educationLevel === 'B.Sc IT' || educationLevel === 'BCA') maxSemesters = 6;
   else if (educationLevel === 'M.Tech' || educationLevel === 'MCA') maxSemesters = 4;
-  
+
   if (maxSemesters === 0) return [{ value: 'N/A', label: 'Not Applicable (N/A)' }];
-  
+
   const options = [];
   for (let i = 1; i <= maxSemesters; i++) {
     const suffix = i === 1 ? 'st' : i === 2 ? 'nd' : i === 3 ? 'rd' : 'th';
@@ -63,8 +63,59 @@ const CareerEngine = () => {
   });
 
   const [analyzing, setAnalyzing] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [unifiedResults, setUnifiedResults] = useState<UnifiedResults | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!user) {
+      setError('Please log in to upload your resume.');
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append('resume', file);
+    formData.append('userId', user.id.toString());
+
+    setUploading(true);
+    setError(null);
+
+    try {
+      const res = await axios.post('/api/ai/upload-resume', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        }
+      });
+
+      const parsed = res.data.parsed;
+
+      // Attempt to map extracted data to the form
+      setResumeData(prev => ({
+        ...prev,
+        personalInfo: {
+          currentRole: parsed.target_career || prev.personalInfo.currentRole,
+          careerGoal: parsed.career_goal || parsed.suggestions || prev.personalInfo.careerGoal
+        },
+        experienceSummary: parsed.bio || prev.experienceSummary,
+        skills: Array.isArray(parsed.skills) ? parsed.skills.join(', ') : prev.skills,
+        experienceLevel: parsed.experience_years ?
+          (parsed.experience_years === 0 ? 'Fresher' :
+            parsed.experience_years <= 3 ? '1-3 years' :
+              parsed.experience_years <= 5 ? '3-5 years' : '5+ years') : prev.experienceLevel,
+        educationLevel: parsed.education || prev.educationLevel
+      }));
+
+    } catch (err: any) {
+      console.error(err);
+      setError(err.response?.data?.error || 'Failed to parse resume. Please fill manually.');
+    } finally {
+      setUploading(false);
+      if (e.target) e.target.value = ''; // Reset input
+    }
+  };
 
   const handleAnalyze = async () => {
     if (!user) {
@@ -92,7 +143,7 @@ const CareerEngine = () => {
 
     try {
       const resumeText = `${resumeData.personalInfo.currentRole} ${resumeData.personalInfo.careerGoal} ${resumeData.experienceSummary} ${resumeData.skills} ${resumeData.tools} ${resumeData.educationLevel} ${resumeData.semester}`;
-      
+
       const profileData = {
         personalInfo: resumeData.personalInfo,
         experience: resumeData.experienceSummary,
@@ -129,11 +180,11 @@ const CareerEngine = () => {
   // Helper variables for charts if results exist
   const mlResults = unifiedResults?.mlPredictions;
   const salaryPrediction = mlResults?.salary_prediction || { min: 0, max: 0, currency: 'USD' };
-  
+
   const resumeGraphData = Array.isArray(mlResults?.resume_breakdown)
     ? mlResults.resume_breakdown.map((item: any) => ({ name: item.name, value: Number(item.value) || 0 }))
     : [];
-    
+
   const radarData = mlResults ? [
     { subject: 'Market Fit', A: Number(mlResults.market_fit_score) || 0, fullMark: 100 },
     { subject: 'Growth', A: Number(mlResults.growth_potential) || 0, fullMark: 100 },
@@ -172,20 +223,46 @@ const CareerEngine = () => {
 
       {!unifiedResults ? (
         <div className="space-y-8">
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             className="bg-white dark:bg-neon-dark border border-gray-200 dark:border-neon-teal rounded-3xl p-8 shadow-sm transition-colors duration-300"
           >
-            <div className="flex items-center gap-3 mb-6">
-              <Sparkles className="h-6 w-6 text-indigo-600" />
-              <h3 className="text-xl font-bold text-gray-900">Career Snapshot</h3>
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-3">
+                <Sparkles className="h-6 w-6 text-indigo-600" />
+                <h3 className="text-xl font-bold text-gray-900">Career Snapshot</h3>
+              </div>
+              <div className="relative">
+                <input
+                  type="file"
+                  accept=".pdf,.txt"
+                  id="resume-upload"
+                  className="hidden"
+                  onChange={handleFileUpload}
+                  disabled={uploading}
+                />
+                <label
+                  htmlFor="resume-upload"
+                  className={`cursor-pointer inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all ${uploading
+                      ? 'bg-gray-100 text-gray-400 dark:bg-neon-dark dark:text-gray-500 cursor-not-allowed'
+                      : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100 dark:bg-indigo-900/30 dark:text-indigo-300 dark:hover:bg-indigo-900/50 outline-2 outline-indigo-600'
+                    }`}
+                >
+                  {uploading ? (
+                    <RefreshCw className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Upload className="h-4 w-4" />
+                  )}
+                  {uploading ? 'Parsing Resume...' : 'Auto-fill from Resume'}
+                </label>
+              </div>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-bold text-gray-500 dark:text-neon-light uppercase mb-1">Current / Desired Role <span className="text-red-500">*</span></label>
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   className="w-full px-4 py-2 rounded-xl border border-gray-200 dark:border-neon-teal bg-white dark:bg-neon-gray text-gray-900 dark:text-neon-light focus:ring-2 focus:ring-indigo-500 dark:focus:ring-neon-cyan outline-none transition-colors duration-200"
                   value={resumeData.personalInfo.currentRole}
                   onChange={(e) => setResumeData({ ...resumeData, personalInfo: { ...resumeData.personalInfo, currentRole: e.target.value } })}
@@ -194,8 +271,8 @@ const CareerEngine = () => {
               </div>
               <div>
                 <label className="block text-xs font-bold text-gray-500 dark:text-neon-light uppercase mb-1">Career Goal <span className="text-red-500">*</span></label>
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   className="w-full px-4 py-2 rounded-xl border border-gray-200 dark:border-neon-teal bg-white dark:bg-neon-gray text-gray-900 dark:text-neon-light focus:ring-2 focus:ring-indigo-500 dark:focus:ring-neon-cyan outline-none transition-colors duration-200"
                   value={resumeData.personalInfo.careerGoal}
                   onChange={(e) => setResumeData({ ...resumeData, personalInfo: { ...resumeData.personalInfo, careerGoal: e.target.value } })}
@@ -218,7 +295,7 @@ const CareerEngine = () => {
                   className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-neon-teal bg-white dark:bg-neon-gray text-gray-900 dark:text-neon-light focus:ring-2 focus:ring-indigo-500 dark:focus:ring-neon-cyan outline-none transition-colors duration-200"
                 >
                   <option value="">Select Education</option>
-                  <option>B.Tech CSE</option>
+                  <option>B.Tech</option>
                   <option>B.Sc IT</option>
                   <option>BCA</option>
                   <option>M.Tech</option>
@@ -285,7 +362,7 @@ const CareerEngine = () => {
               </div>
             </div>
           </motion.div>
-          
+
           <motion.button
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
@@ -308,7 +385,7 @@ const CareerEngine = () => {
           </motion.button>
         </div>
       ) : (
-        <motion.div 
+        <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           className="space-y-12"
@@ -332,7 +409,7 @@ const CareerEngine = () => {
                 <h3 className="text-3xl font-extrabold text-indigo-600">{unifiedResults.predictedRole}</h3>
                 <p className="text-gray-600 mt-4 text-sm leading-relaxed">{unifiedResults.jobDescription}</p>
               </div>
-              <button 
+              <button
                 onClick={handleSearchJobs}
                 className="mt-6 flex items-center justify-center gap-2 bg-slate-900 text-white w-full py-3 rounded-xl font-bold hover:bg-slate-800 transition-all"
               >
@@ -453,7 +530,7 @@ const CareerEngine = () => {
                   if (!href || href.trim() === '' || href.includes('example.com')) {
                     href = `https://www.google.com/search?q=${encodeURIComponent(`${course.name} course ${course.platform}`)}`;
                   }
-                  
+
                   return (
                     <div key={i} className="bg-white p-6 rounded-3xl border border-blue-100 shadow-sm flex flex-col justify-between">
                       <div>
@@ -474,9 +551,9 @@ const CareerEngine = () => {
               <p className="text-gray-500 italic">No specific courses recommended at this time.</p>
             )}
           </div>
-          
+
           <div className="text-center pt-8">
-            <button 
+            <button
               onClick={() => setUnifiedResults(null)}
               className="text-gray-500 hover:text-gray-800 font-bold underline transition-colors"
             >
