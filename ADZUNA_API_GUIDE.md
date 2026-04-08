@@ -9,8 +9,8 @@ PathForge now integrates with the **Adzuna API** to fetch real job listings inst
 The following credentials are configured and embedded in the system:
 
 ```
-App ID: f448502e
-App Key: 7816e36630e9802e2c7e656b419716f9
+App ID: 
+App Key: 
 ```
 
 > **Note:** These credentials are embedded in `/src/server/adzunaService.ts`. For production deployment, consider moving them to environment variables for security.
